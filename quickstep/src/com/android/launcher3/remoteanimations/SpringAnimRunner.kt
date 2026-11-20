@@ -52,7 +52,9 @@ constructor(
     private val matrix = Matrix()
     private val tmpPos = Point()
     private val currentAnimTargetRectF = RectF()
-    private val endRadius = targetRect.width().coerceAtLeast(1f) / 2f
+    private val endRadius =
+        minOf(targetRect.width(), targetRect.height()).coerceAtLeast(1f) / 2f
+    private val centerCropWindow = targetRect.width() > targetRect.height() * 1.35f
     private val surfaceApplier = SurfaceTransactionApplier(activityContext.dragLayer)
     private val windowStartBounds = RectF(closingWindowStartRect)
     private val windowOriginalBounds =
@@ -112,6 +114,7 @@ constructor(
 
                 // Scale the target window to match the currentRectF.
                 val scale: Float
+                var cropOffsetY = 0f
 
                 // We need to infer the crop (we crop the window to match the currentRectF).
                 if (windowStartBounds.height() > windowStartBounds.width()) {
@@ -119,7 +122,20 @@ constructor(
                         (currentAnimTargetRectF.width() / windowOriginalBounds.width())
                             .coerceAtMost(1f)
                     val unscaledHeight = currentAnimTargetRectF.height() / scale
-                    tmpRectF.set(0f, 0f, windowOriginalBounds.width(), unscaledHeight)
+                    if (centerCropWindow) {
+                        val croppedHeight =
+                            (windowOriginalBounds.height() - unscaledHeight).coerceAtLeast(0f)
+                        val cropTop = croppedHeight / 2f
+                        cropOffsetY = cropTop * scale
+                        tmpRectF.set(
+                            0f,
+                            cropTop,
+                            windowOriginalBounds.width(),
+                            cropTop + unscaledHeight,
+                        )
+                    } else {
+                        tmpRectF.set(0f, 0f, windowOriginalBounds.width(), unscaledHeight)
+                    }
                 } else {
                     scale =
                         (currentAnimTargetRectF.height() / windowOriginalBounds.height())
@@ -131,7 +147,10 @@ constructor(
 
                 // Match size and position of currentRect.
                 matrix.setScale(scale, scale)
-                matrix.postTranslate(currentAnimTargetRectF.left, currentAnimTargetRectF.top)
+                matrix.postTranslate(
+                    currentAnimTargetRectF.left,
+                    currentAnimTargetRectF.top - cropOffsetY,
+                )
 
                 tmpRectF.round(tmpRect)
                 builder

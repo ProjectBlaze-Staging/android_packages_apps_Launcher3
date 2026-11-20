@@ -687,7 +687,14 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
     private Interpolator getDynamicOpeningInterpolator() {
         BlazeHomeUpController.GesturePhysics hp = BlazeHomeUpController.resolvePhysics(mLauncher);
-        return new SpringInterpolator(hp.scaleStiffness, hp.scaleDamping, hp.appOpenDurationMs);
+        int mode = Settings.Secure.getInt(
+                mLauncher.getContentResolver(),
+                BlazeHomeUpController.KEY_GESTURE_MODE,
+                BlazeHomeUpController.MODE_DYNAMIC);
+        float stiffness = (mode == BlazeHomeUpController.MODE_DYNAMIC && mCosLaunch)
+                ? 280f : hp.scaleStiffness;
+        float damping = Math.max(0.96f, hp.scaleDamping);
+        return new SpringInterpolator(stiffness, damping, hp.appOpenDurationMs);
     }
 
     @Override
@@ -1036,9 +1043,13 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                 ? new float[]{1, 0}
                 : new float[]{0, 1};
 
+        float targetWorkspaceScale = BlazeHomeUpController.resolvePhysics(mLauncher).homeScale;
+        if (targetWorkspaceScale <= 0f || targetWorkspaceScale >= 1f) {
+            targetWorkspaceScale = 0.88f;
+        }
         float[] scales = isAppOpening
-                ? new float[]{1, mDeviceProfile.getWorkspaceProfile().getWorkspaceContentScale()}
-                : new float[]{mDeviceProfile.getWorkspaceProfile().getWorkspaceContentScale(), 1};
+                ? new float[]{1f, targetWorkspaceScale}
+                : new float[]{targetWorkspaceScale, 1f};
 
         // Pause expensive view updates as they can lead to layer thrashing and skipped frames.
         mLauncher.pauseExpensiveViewUpdates();
@@ -1381,7 +1392,7 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                     mDy = new FloatProp(0, prop.dY);
                     mIconScaleToFitScreen = new FloatProp(prop.initialAppIconScale,
                             prop.finalAppIconScale);
-                    float interpolatedPercent = mOpeningInterpolator.getInterpolation(percent);
+                    float interpolatedPercent = dynamicOpeningInterpolator.getInterpolation(percent);
                     mCropRectHeight.value = Utilities.mapRange(interpolatedPercent,
                             prop.cropHeightStart, prop.cropHeightEnd);
                     mCropRectCenterY.value = Utilities.mapRange(interpolatedPercent,
@@ -2133,8 +2144,16 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
             }
         }
 
+        final boolean flyToDynamicIsland =
+                com.android.quickstep.util.DynamicIslandFlightHelper.shouldFlyToDynamicIsland(
+                        mLauncher, runningTaskTarget, null);
+
         // Get floating view and target rect.
-        if (launcherView instanceof LauncherAppWidgetHostView) {
+        if (flyToDynamicIsland) {
+            targetRect.set(
+                    com.android.quickstep.util.DynamicIslandFlightHelper.getDynamicIslandTargetRect(
+                            mLauncher, mDeviceProfile));
+        } else if (launcherView instanceof LauncherAppWidgetHostView) {
             Size windowSize = new Size(mDeviceProfile.getDeviceProperties().getWidthPx(),
                     mDeviceProfile.getDeviceProperties().getHeightPx());
             int fallbackBackgroundColor =
@@ -2163,7 +2182,23 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
 
         // Hook up floating views to the closing window animators.
         // note the coordinate of closingWindowStartRect is based on launcher
-        if (floatingIconView != null) {
+        if (flyToDynamicIsland) {
+            anim.addOnUpdateListener(new SpringAnimRunner(
+                    targets, targetRect, closingWindowStartRectF,
+                    mLauncher, startWindowCornerRadius, 0.92f, 0.48f) {
+                private boolean mSwallowTriggered = false;
+
+                @Override
+                public void onUpdate(RectF currentRectF, float progress) {
+                    if (!mSwallowTriggered && progress >= 0.48f) {
+                        mSwallowTriggered = true;
+                        com.android.quickstep.util.DynamicIslandFlightHelper
+                                .triggerDynamicIslandSwallow(mLauncher);
+                    }
+                    super.onUpdate(currentRectF, progress);
+                }
+            });
+        } else if (floatingIconView != null) {
             anim.addAnimatorListener(floatingIconView);
             floatingIconView.setOnTargetChangeListener(anim::onTargetPositionChanged);
             floatingIconView.setFastFinishRunnable(anim::end);
@@ -2407,8 +2442,20 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
             RectF startRect,
             float startWindowCornerRadius,
             boolean fromPredictiveBack) {
+        RemoteAnimationTarget closingTarget = null;
+        for (RemoteAnimationTarget target : appTargets) {
+            if (target.mode == MODE_CLOSING) {
+                closingTarget = target;
+                break;
+            }
+        }
+        final boolean flyToDynamicIsland =
+                com.android.quickstep.util.DynamicIslandFlightHelper.shouldFlyToDynamicIsland(
+                        mLauncher, closingTarget, null);
+
         View launcherView = findLauncherView(appTargets);
-        if (launcherView != null
+        if (!flyToDynamicIsland
+                && launcherView != null
                 && launcherView.getTag() instanceof ItemInfo info
                 && info.shouldUseBackgroundAnimation()) {
             // Try to create a return animation
@@ -2441,7 +2488,8 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                 || launcherIsASurfaceWithMode(AnimatedSurfaceUtils.mapFromTargets(appTargets),
                 AnimatedSurface.Mode.OPENING);
 
-        boolean playFallBackAnimation = (launcherView == null
+        boolean playFallBackAnimation = (!flyToDynamicIsland
+                && launcherView == null
                 && launcherIsForceInvisibleOrOpening)
                 || mLauncher.getWorkspace().isOverlayShown()
                 || shouldPlayFallbackClosingAnimation(appTargets);
@@ -2469,12 +2517,13 @@ public class QuickstepTransitionManager implements OnDeviceProfileChangeListener
                 skipAllAppsScale = true;
             } else {
                 anim.play(
-                        new ScalingWorkspaceRevealAnim(mLauncher, rectFSpringAnim,
-                                rectFSpringAnim.getTargetRect(),
+                        new ScalingWorkspaceRevealAnim(mLauncher,
+                                flyToDynamicIsland ? null : rectFSpringAnim,
+                                flyToDynamicIsland ? null : rectFSpringAnim.getTargetRect(),
                                 false /* playAlphaReveal */,
                                 Utilities.blurBackgroundAtAppLaunch(
                                         mLauncher.getApplicationContext()) /* playBlur */,
-                                mCosLaunch && launcherView != null
+                                !flyToDynamicIsland && mCosLaunch && launcherView != null
                                         && launcherView.getTag() instanceof ItemInfo item
                                         && item.container == LauncherSettings.Favorites.CONTAINER_HOTSEAT,
                                 mCosLaunch,

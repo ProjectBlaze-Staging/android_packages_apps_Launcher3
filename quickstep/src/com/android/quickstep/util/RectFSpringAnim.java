@@ -21,11 +21,15 @@ import static java.lang.annotation.RetentionPolicy.SOURCE;
 import android.animation.Animator;
 import android.content.ContentResolver;
 import android.content.Context;
+import android.database.ContentObserver;
 import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.util.Log;
 
 import androidx.annotation.IntDef;
 import androidx.annotation.Nullable;
@@ -362,8 +366,8 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
                                         .setStiffness(mRectStiffness)
                                         .setDampingRatio(dampingZ))
                         .setStartVelocity(scaleVelocity)
-                        // Allow the size spring to pass its target for landing bounce when underdamped.
-                        .setMaxValue((mCos || dampingZ < 0.99f) ? 1.28f : 1f)
+                        // Cap landing scale overshoot so closing windows never balloon to 1.28f.
+                        .setMaxValue((mCos || dampingZ < 0.99f) ? 1.03f : 1f)
                         .setMinimumVisibleChange(minVisibleChange)
                         .addEndListener((animation, canceled, value, velocity) -> {
                             if (mPaused) return;
@@ -575,15 +579,23 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
                 cos = true;
             }
 
-            BlazeHomeUpController.GesturePhysics hp =
-                    BlazeHomeUpController.resolvePhysics(context);
-            stiffnessX = hp.stiffnessX;
-            stiffnessY = hp.stiffnessY;
-            dampingX = hp.dampingX;
-            dampingY = hp.dampingY;
-            rectStiffness = hp.scaleStiffness;
-            rectDamping = hp.scaleDamping;
-            tracking = hp.tracking;
+            int gestureMode = Settings.Secure.getInt(
+                    context.getContentResolver(),
+                    BlazeHomeUpController.KEY_GESTURE_MODE,
+                    BlazeHomeUpController.MODE_DYNAMIC);
+            if (!cos || gestureMode != BlazeHomeUpController.MODE_DYNAMIC) {
+                BlazeHomeUpController.GesturePhysics hp =
+                        BlazeHomeUpController.resolvePhysics(context);
+                stiffnessX = hp.stiffnessX;
+                stiffnessY = hp.stiffnessY;
+                dampingX = hp.dampingX;
+                dampingY = hp.dampingY;
+                rectStiffness = hp.scaleStiffness;
+                rectDamping = hp.scaleDamping;
+                if (gestureMode == BlazeHomeUpController.MODE_ADVANCED) {
+                    tracking = hp.tracking;
+                }
+            }
 
             this.startRect = startRect;
             this.targetRect = targetRect;
@@ -651,11 +663,8 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
     }
 
     /**
-     * Reads and resolves Good Lock / Home Up (v17) gesture physics, app open curves,
-     * folder popup, workspace grid/icon scale, and Task Changer parameters from Settings.Secure.
-     *
-     * All default presets and simple tuning formulas match Samsung Home Up 17.0.00.54
-     * (TuningDataKt.java, SimpleTuningLogic.java, GestureAdvancedTuningActivity.java).
+     * Reads and resolves Good Lock / Home Up (v17) & AmeOS 16 Animation Kitchen gesture physics,
+     * app open curves, folder popup, workspace grid/icon scale, and Task Changer parameters.
      */
     public static final class BlazeHomeUpController {
 
@@ -684,12 +693,12 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
         public static final String KEY_TASK_CHANGER_STYLE = "blaze_homeup_task_changer_style";
         public static final String KEY_RECENTS_FOCUS_PREV = "blaze_homeup_recents_focus_prev";
 
-        public static final int MODE_DYNAMIC = 0;
-        public static final int MODE_CLASSIC = 1;
-        public static final int MODE_PLAYFUL = 2;
-        public static final int MODE_SWEET = 3;
+        public static final int MODE_DYNAMIC = 0;  // AmeOS Natural (Critically Damped Default)
+        public static final int MODE_CLASSIC = 1;  // AmeOS Casual (Relaxed & Smooth)
+        public static final int MODE_PLAYFUL = 2;  // AmeOS Fast (Snappy & Responsive)
+        public static final int MODE_SWEET = 3;    // Sweet / Expressive
         public static final int MODE_SIMPLE = 4;
-        public static final int MODE_ADVANCED = 5;
+        public static final int MODE_ADVANCED = 5; // AmeOS Custom
 
         public static final int TASK_STYLE_DEFAULT = 0;
         public static final int TASK_STYLE_STACK = 1;
@@ -740,28 +749,28 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
                 }
                 case MODE_ADVANCED: {
                     p.dampingX = Utilities.boundToRange(
-                            Settings.Secure.getFloat(r, KEY_DAMPING_X, 0.82f), 0.50f, 1.00f);
+                            Settings.Secure.getFloat(r, KEY_DAMPING_X, 0.96f), 0.50f, 1.00f);
                     p.dampingY = Utilities.boundToRange(
-                            Settings.Secure.getFloat(r, KEY_DAMPING_Y, 0.82f), 0.50f, 1.00f);
+                            Settings.Secure.getFloat(r, KEY_DAMPING_Y, 0.86f), 0.50f, 1.00f);
                     p.stiffnessX = Utilities.boundToRange(
-                            Settings.Secure.getFloat(r, KEY_STIFFNESS_X, 240f), 50f, 900f);
+                            Settings.Secure.getFloat(r, KEY_STIFFNESS_X, 330f), 50f, 900f);
                     p.stiffnessY = Utilities.boundToRange(
-                            Settings.Secure.getFloat(r, KEY_STIFFNESS_Y, 240f), 50f, 900f);
+                            Settings.Secure.getFloat(r, KEY_STIFFNESS_Y, 260f), 50f, 900f);
                     p.scaleDamping = Utilities.boundToRange(
-                            Settings.Secure.getFloat(r, KEY_SCALE_DAMPING, 0.86f), 0.50f, 1.00f);
+                            Settings.Secure.getFloat(r, KEY_SCALE_DAMPING, 0.96f), 0.50f, 1.00f);
                     p.scaleStiffness = Utilities.boundToRange(
-                            Settings.Secure.getFloat(r, KEY_SCALE_STIFFNESS, 300f), 50f, 900f);
+                            Settings.Secure.getFloat(r, KEY_SCALE_STIFFNESS, 330f), 50f, 900f);
                     p.tracking = Utilities.boundToRange(
                             Settings.Secure.getInt(r, KEY_TRACKING_MODE, TRACKING_CENTER),
                             TRACKING_TOP, TRACKING_BOTTOM);
                     p.appOpenDurationMs = Utilities.boundToRange(
-                            Settings.Secure.getInt(r, KEY_APP_OPEN_DURATION, 450), 180, 1200);
+                            Settings.Secure.getInt(r, KEY_APP_OPEN_DURATION, 380), 180, 1200);
                     p.homeDurationMs = Utilities.boundToRange(
-                            Settings.Secure.getInt(r, KEY_HOME_DURATION, 480), 180, 1800);
+                            Settings.Secure.getInt(r, KEY_HOME_DURATION, 380), 180, 1800);
                     p.homeScale = Utilities.boundToRange(
                             Settings.Secure.getFloat(r, KEY_HOME_SCALE, 0.88f), 0.65f, 0.98f);
                     p.wallpaperDurationMs = Utilities.boundToRange(
-                            Settings.Secure.getInt(r, KEY_WALLPAPER_DURATION, 850), 200, 2000);
+                            Settings.Secure.getInt(r, KEY_WALLPAPER_DURATION, 550), 200, 2000);
                     break;
                 }
                 case MODE_DYNAMIC:
@@ -772,46 +781,49 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
             return p;
         }
 
+        /** AmeOS 16 "Natural" Default: Critically damped X (1.0f), smooth 0.96f scale damping, 0.88f BG scale */
         private static void applyPreset0Dynamic(GesturePhysics p) {
-            p.dampingX = 0.80f;
-            p.dampingY = 0.80f;
-            p.stiffnessX = 300.0f;
-            p.stiffnessY = 300.0f;
-            p.scaleDamping = 0.75f;
-            p.scaleStiffness = 350.0f;
-            p.tracking = TRACKING_BOTTOM;
-            p.appOpenDurationMs = 380L;
+            p.dampingX = 1.00f;
+            p.dampingY = 0.86f;
+            p.stiffnessX = 330.0f;
+            p.stiffnessY = 250.0f;
+            p.scaleDamping = 0.96f;
+            p.scaleStiffness = 330.0f;
+            p.tracking = TRACKING_CENTER;
+            p.appOpenDurationMs = 360L;
             p.homeDurationMs = 350L;
-            p.homeScale = 0.90f;
+            p.homeScale = 0.88f;
             p.wallpaperDurationMs = 450L;
         }
 
+        /** AmeOS 16 "Casual": Soft, relaxed, organic motion */
         private static void applyPreset1Classic(GesturePhysics p) {
-            p.dampingX = 1.00f;
-            p.dampingY = 1.00f;
-            p.stiffnessX = 150.0f;
-            p.stiffnessY = 150.0f;
-            p.scaleDamping = 1.00f;
-            p.scaleStiffness = 150.0f;
-            p.tracking = TRACKING_TOP;
-            p.appOpenDurationMs = 500L;
-            p.homeDurationMs = 700L;
-            p.homeScale = 0.82f;
-            p.wallpaperDurationMs = 1100L;
+            p.dampingX = 0.96f;
+            p.dampingY = 0.82f;
+            p.stiffnessX = 220.0f;
+            p.stiffnessY = 200.0f;
+            p.scaleDamping = 0.92f;
+            p.scaleStiffness = 220.0f;
+            p.tracking = TRACKING_CENTER;
+            p.appOpenDurationMs = 460L;
+            p.homeDurationMs = 480L;
+            p.homeScale = 0.85f;
+            p.wallpaperDurationMs = 680L;
         }
 
+        /** AmeOS 16 "Fast": High-stiffness, zero-overshoot snappy response */
         private static void applyPreset2Playful(GesturePhysics p) {
-            p.dampingX = 0.66f;
-            p.dampingY = 0.66f;
-            p.stiffnessX = 330.0f;
-            p.stiffnessY = 330.0f;
-            p.scaleDamping = 0.68f;
-            p.scaleStiffness = 650.0f;
+            p.dampingX = 1.00f;
+            p.dampingY = 0.94f;
+            p.stiffnessX = 480.0f;
+            p.stiffnessY = 420.0f;
+            p.scaleDamping = 0.98f;
+            p.scaleStiffness = 480.0f;
             p.tracking = TRACKING_CENTER;
-            p.appOpenDurationMs = 420L;
-            p.homeDurationMs = 320L;
-            p.homeScale = 0.76f;
-            p.wallpaperDurationMs = 620L;
+            p.appOpenDurationMs = 260L;
+            p.homeDurationMs = 260L;
+            p.homeScale = 0.90f;
+            p.wallpaperDurationMs = 320L;
         }
 
         private static void applyPreset3Sweet(GesturePhysics p) {
@@ -863,12 +875,48 @@ public class RectFSpringAnim extends SurfaceReleaseCheck {
             return pct / 100.0f;
         }
 
+        private static volatile int sCachedTaskChangerStyle = -1;
+        private static ContentObserver sTaskChangerObserver = null;
+
         public static int getTaskChangerStyle(Context context) {
             if (context == null) return TASK_STYLE_DEFAULT;
-            return Utilities.boundToRange(
-                    Settings.Secure.getInt(context.getContentResolver(), KEY_TASK_CHANGER_STYLE,
-                            TASK_STYLE_DEFAULT),
-                    TASK_STYLE_DEFAULT, TASK_STYLE_SLIM);
+            if (sCachedTaskChangerStyle >= 0) {
+                return sCachedTaskChangerStyle;
+            }
+            synchronized (BlazeHomeUpController.class) {
+                if (sCachedTaskChangerStyle >= 0) {
+                    return sCachedTaskChangerStyle;
+                }
+                Context appContext = context.getApplicationContext() != null
+                        ? context.getApplicationContext() : context;
+                ContentResolver cr = appContext.getContentResolver();
+                sCachedTaskChangerStyle = Utilities.boundToRange(
+                        Settings.Secure.getInt(cr, KEY_TASK_CHANGER_STYLE,
+                                TASK_STYLE_DEFAULT),
+                        TASK_STYLE_DEFAULT, TASK_STYLE_SLIM);
+                if (sTaskChangerObserver == null) {
+                    sTaskChangerObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+                        @Override
+                        public void onChange(boolean selfChange) {
+                            try {
+                                sCachedTaskChangerStyle = Utilities.boundToRange(
+                                        Settings.Secure.getInt(cr, KEY_TASK_CHANGER_STYLE,
+                                                TASK_STYLE_DEFAULT),
+                                        TASK_STYLE_DEFAULT, TASK_STYLE_SLIM);
+                            } catch (Throwable ignored) {
+                            }
+                        }
+                    };
+                    try {
+                        cr.registerContentObserver(
+                                Settings.Secure.getUriFor(KEY_TASK_CHANGER_STYLE),
+                                false,
+                                sTaskChangerObserver);
+                    } catch (Throwable ignored) {
+                    }
+                }
+                return sCachedTaskChangerStyle;
+            }
         }
 
         public static boolean shouldFocusPreviousTaskInRecents(Context context) {

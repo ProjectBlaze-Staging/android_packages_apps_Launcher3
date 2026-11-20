@@ -83,6 +83,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.LocusId;
 import android.content.res.Configuration;
+import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.BlendMode;
 import android.graphics.Canvas;
@@ -94,10 +95,13 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.SystemClock;
 import android.os.Trace;
 import android.os.UserHandle;
 import android.os.VibrationEffect;
+import android.provider.Settings;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
@@ -548,6 +552,8 @@ public abstract class RecentsView<
      * [GroupedTaskInfo] is running. If a gesture is not in progress, this will be null.
      */
     private @Nullable GroupedTaskInfo mActiveGestureGroupedTaskInfo;
+    private int mTaskChangerStyle = BlazeHomeUpController.TASK_STYLE_DEFAULT;
+    private ContentObserver mTaskChangerObserver;
 
     /**
      * Getting views should be done via {@link #getTaskViewFromPool(TaskViewType)}
@@ -1117,11 +1123,36 @@ public abstract class RecentsView<
         if (mIsMultipleDesktopFrontendEnabled) {
             mDesktopVisibilityController.registerDesktopVisibilityListener(mUtils);
         }
+        mTaskChangerStyle = BlazeHomeUpController.getTaskChangerStyle(getContext());
+        if (mTaskChangerObserver == null) {
+            mTaskChangerObserver = new ContentObserver(new Handler(Looper.getMainLooper())) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    mTaskChangerStyle = BlazeHomeUpController.getTaskChangerStyle(getContext());
+                    invalidate();
+                }
+            };
+            try {
+                getContext().getContentResolver().registerContentObserver(
+                        Settings.Secure.getUriFor(BlazeHomeUpController.KEY_TASK_CHANGER_STYLE),
+                        false,
+                        mTaskChangerObserver);
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
+
+        if (mTaskChangerObserver != null) {
+            try {
+                getContext().getContentResolver().unregisterContentObserver(mTaskChangerObserver);
+            } catch (Throwable ignored) {
+            }
+            mTaskChangerObserver = null;
+        }
 
         updateTaskStackListenerState();
         if (!enableLowResThumbnailPreloading()) {
@@ -2391,7 +2422,7 @@ public abstract class RecentsView<
         // Clear all button alpha was set by the previous line.
         mActionsView.getIndexScrollAlpha().updateValue(1 - mClearAllButton.getScrollAlpha());
 
-        int style = BlazeHomeUpController.getTaskChangerStyle(getContext());
+        int style = mTaskChangerStyle;
         boolean applyCustomStyle = !showAsGrid() && getWidth() > 0;
         float activeFraction = Utilities.boundToRange(1f - mFullscreenProgress, 0f, 1f);
         float screenCenter = scroll + getWidth() / 2f;
@@ -2401,9 +2432,15 @@ public abstract class RecentsView<
             if (!(child instanceof TaskView taskView)) continue;
             if (!applyCustomStyle || style == BlazeHomeUpController.TASK_STYLE_DEFAULT
                     || activeFraction <= 0f) {
-                taskView.setTaskChangerScale(1f);
-                taskView.setTaskChangerTranslationX(0f);
-                taskView.setTranslationZ(0f);
+                if (Math.abs(taskView.getTaskChangerScale() - 1f) > 0.0001f) {
+                    taskView.setTaskChangerScale(1f);
+                }
+                if (Math.abs(taskView.getTaskChangerTranslationX()) > 0.01f) {
+                    taskView.setTaskChangerTranslationX(0f);
+                }
+                if (Math.abs(taskView.getTranslationZ()) > 0.01f) {
+                    taskView.setTranslationZ(0f);
+                }
                 continue;
             }
             float childCenter = (taskView.getLeft() + taskView.getRight()) / 2f;
@@ -2414,17 +2451,29 @@ public abstract class RecentsView<
                 float scale = Utilities.mapRange(activeFraction, 1f, targetScale);
                 float overlapShift = -d * taskView.getMeasuredWidth() * 0.28f * activeFraction;
                 float z = (1.5f - absD) * 12f * activeFraction;
-                taskView.setTaskChangerScale(scale);
-                taskView.setTaskChangerTranslationX(overlapShift);
-                taskView.setTranslationZ(z);
+                if (Math.abs(taskView.getTaskChangerScale() - scale) > 0.0001f) {
+                    taskView.setTaskChangerScale(scale);
+                }
+                if (Math.abs(taskView.getTaskChangerTranslationX() - overlapShift) > 0.01f) {
+                    taskView.setTaskChangerTranslationX(overlapShift);
+                }
+                if (Math.abs(taskView.getTranslationZ() - z) > 0.01f) {
+                    taskView.setTranslationZ(z);
+                }
             } else if (style == BlazeHomeUpController.TASK_STYLE_SLIM) {
                 float targetScale = 0.84f - 0.08f * absD;
                 float scale = Utilities.mapRange(activeFraction, 1f, targetScale);
                 float pullShift = -d * taskView.getMeasuredWidth() * 0.18f * activeFraction;
                 float z = (1.5f - absD) * 4f * activeFraction;
-                taskView.setTaskChangerScale(scale);
-                taskView.setTaskChangerTranslationX(pullShift);
-                taskView.setTranslationZ(z);
+                if (Math.abs(taskView.getTaskChangerScale() - scale) > 0.0001f) {
+                    taskView.setTaskChangerScale(scale);
+                }
+                if (Math.abs(taskView.getTaskChangerTranslationX() - pullShift) > 0.01f) {
+                    taskView.setTaskChangerTranslationX(pullShift);
+                }
+                if (Math.abs(taskView.getTranslationZ() - z) > 0.01f) {
+                    taskView.setTranslationZ(z);
+                }
             }
         }
     }

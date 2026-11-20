@@ -73,6 +73,7 @@ import com.android.launcher3.util.SplitConfigurationOptions.STAGE_POSITION_UNDEF
 import com.android.launcher3.util.SplitConfigurationOptions.StagePosition
 import com.android.launcher3.util.TraceHelper
 import com.android.launcher3.util.TransformingTouchDelegate
+import kotlin.math.abs
 import com.android.launcher3.util.ViewPool
 import com.android.launcher3.util.rects.set
 import com.android.quickstep.FullscreenDrawParams
@@ -398,7 +399,7 @@ constructor(
 
     var taskChangerScale = 1f
         set(value) {
-            if (field == value) return
+            if (abs(field - value) < 0.0001f) return
             field = value
             applyScale()
         }
@@ -501,10 +502,15 @@ constructor(
 
     var taskChangerTranslationX = 0f
         set(value) {
-            if (field == value) return
+            if (abs(field - value) < 0.01f) return
             field = value
             applyTranslationX()
         }
+
+    override fun setTranslationZ(translationZ: Float) {
+        if (abs(getTranslationZ() - translationZ) < 0.01f) return
+        super.setTranslationZ(translationZ)
+    }
 
     private val taskViewAlpha = MultiValueAlpha(this, Alpha.entries.size)
     protected var stableAlpha by MultiPropertyDelegate(taskViewAlpha, Alpha.Stable)

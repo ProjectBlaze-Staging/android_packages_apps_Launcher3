@@ -101,8 +101,21 @@ class HomeBackAnimation(
         )
     ).setSyncTransactionApplier(applier)
     private val renderer = HomeWindowAnimation(
-        sourceCrop, homeToWindow, params, previewCornerRadius, sourceCrop.width() / 2f,
+        sourceCrop,
+        homeToWindow,
+        params,
+        previewCornerRadius,
+        if (flyToDynamicIsland) targetRect.height() / 2f else sourceCrop.width() / 2f,
         object : HomeWindowAnimation.Callbacks {
+            override fun isWidget(): Boolean = flyToDynamicIsland
+
+            override fun getWindowCornerRadius(progress: Float): Float =
+                if (flyToDynamicIsland) {
+                    Utilities.mapRange(progress, previewCornerRadius, targetRect.height() / 2f)
+                } else {
+                    -1f
+                }
+
             override fun getWindowAlpha(progress: Float): Float = icon?.getWindowAlpha(progress)
                 ?: if (flyToDynamicIsland) {
                     when {
@@ -160,9 +173,9 @@ class HomeBackAnimation(
         if (!returningToDrawer) {
             reveal = icon?.createReveal(true) ?: ScalingWorkspaceRevealAnim(
                 launcher,
-                if (flyToDynamicIsland) spring else null,
-                if (flyToDynamicIsland) targetRect else null,
-                flyToDynamicIsland,
+                null,
+                null,
+                false,
                 true,
                 false,
                 true,

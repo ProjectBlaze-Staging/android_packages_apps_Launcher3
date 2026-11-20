@@ -18,6 +18,10 @@ package com.android.launcher3.graphics
 
 import android.content.Context
 import android.content.res.Resources
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.Settings
 import androidx.annotation.AnyThread
 import com.android.launcher3.LauncherPrefChangeListener
 import com.android.launcher3.LauncherPrefs
@@ -35,6 +39,7 @@ import com.android.launcher3.graphics.theme.ThemePreference
 import com.android.launcher3.graphics.theme.ThemePreference.Companion.MONO_THEME_VALUE
 import com.android.launcher3.icons.DotRenderer.IconShapeInfo
 import com.android.launcher3.icons.GraphicsUtils.generateIconShape
+import com.android.launcher3.icons.BlazeIconPackManager
 import com.android.launcher3.icons.IconShape
 import com.android.launcher3.icons.IconThemeController
 import com.android.launcher3.shapes.IconShapeModel.Companion.DEFAULT_ICON_RADIUS
@@ -105,10 +110,49 @@ constructor(
         }
         prefs.addListener(prefListener, PREF_ICON_SHAPE)
         lifecycle.addCloseable(themePreference.forEach(mainExecutor) { verifyIconState() })
+
+        // Re-evaluate when BlazeHouse or SetupWizard changes the selected icon pack or themed icons.
+        val iconPackObserver =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    syncExternalThemedIconsSetting()
+                    verifyIconState()
+                }
+            }
+        syncExternalThemedIconsSetting()
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(BlazeIconPackManager.SETTING_KEY),
+            false,
+            iconPackObserver,
+        )
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor("themed_icon_enabled"),
+            false,
+            iconPackObserver,
+        )
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor("themed_icons"),
+            false,
+            iconPackObserver,
+        )
+        lifecycle.addCloseable { context.contentResolver.unregisterContentObserver(iconPackObserver) }
         lifecycle.addCloseable {
             prefs.removeListener(prefListener, PREF_ICON_SHAPE)
             iconState.closeController()
         }
+    }
+
+    private fun syncExternalThemedIconsSetting() {
+        try {
+            val pack = Settings.Secure.getString(context.contentResolver, BlazeIconPackManager.SETTING_KEY)
+            val themedEnabled = Settings.Secure.getInt(context.contentResolver, "themed_icon_enabled", -1)
+            val shouldEnableMono = BlazeIconPackManager.STYLE_ADAPTIVE == pack || themedEnabled == 1
+            if (shouldEnableMono) {
+                themePreference.setValue(MONO_THEME_VALUE)
+            } else if (themedEnabled == 0 || (pack != null && BlazeIconPackManager.STYLE_ADAPTIVE != pack)) {
+                themePreference.setValue(null) { it == MONO_THEME_VALUE }
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun verifyIconState() {
@@ -116,7 +160,9 @@ constructor(
         val oldState = iconState
         if (newState == oldState) return
         val hasThemedChanged =
-            newState.themeCode != oldState.themeCode || newState.isCircle != oldState.isCircle
+            newState.themeCode != oldState.themeCode ||
+                newState.isCircle != oldState.isCircle ||
+                newState.iconPackCode != oldState.iconPackCode
         iconState = newState
         if (hasThemedChanged) {
             // trigger listeners only for theme change, not shape change
@@ -201,6 +247,7 @@ constructor(
             shapeRadius = shapeModel?.shapeRadius ?: DEFAULT_ICON_RADIUS,
             themeCode = themeCode,
             fileShape = fileShape,
+            iconPackCode = BlazeIconPackManager.resolveSelectedPack(context),
         )
     }
 
@@ -215,6 +262,8 @@ constructor(
         val folderShape: ShapeDelegate,
         val shapeRadius: Float,
         val fileShape: ShapeDelegate,
+        /* Package name of the active icon pack, or empty for stock icons */
+        val iconPackCode: String = "",
     ) {
         val iconShapeInfo = IconShapeInfo.fromPath(iconShape.getPath(), DEFAULT_PATH_SIZE_INT)
     }

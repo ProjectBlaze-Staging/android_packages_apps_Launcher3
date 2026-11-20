@@ -365,6 +365,45 @@ public class Hotseat extends CellLayout implements Insettable {
         mQsb.layout(left, top, right, bottom);
     }
 
+    private final android.graphics.Paint mDockFillPaint =
+            new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.Paint mDockRimPaint =
+            new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+    private final android.graphics.RectF mDockRectF = new android.graphics.RectF();
+
+    @Override
+    protected void dispatchDraw(android.graphics.Canvas canvas) {
+        ShortcutAndWidgetContainer icons = getShortcutsAndWidgets();
+        if (!mHasVerticalHotseat && icons != null && icons.getVisibility() == View.VISIBLE
+                && icons.getAlpha() > 0.05f && icons.getHeight() > 0) {
+            float d = getResources().getDisplayMetrics().density;
+            float alphaMul = icons.getAlpha();
+            float left = Math.max(12f * d, icons.getLeft() - 6f * d);
+            float right = Math.min(getWidth() - 12f * d, icons.getRight() + 6f * d);
+            float top = Math.max(2f * d, icons.getTop() - 4f * d);
+            float bottom = Math.min(getHeight() - 4f * d, icons.getBottom() + 4f * d);
+            if (right > left + 48f * d && bottom > top + 36f * d) {
+                mDockRectF.set(left, top, right, bottom);
+                float cornerRadius = Math.min(28f * d, mDockRectF.height() * 0.46f);
+                boolean isNight = (getResources().getConfiguration().uiMode
+                        & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                        == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                int fillAlpha = Math.round((isNight ? 0x3A : 0x52) * alphaMul);
+                int fillBase = isNight ? 0x00141C2B : 0x00F4FAFF;
+                mDockFillPaint.setStyle(android.graphics.Paint.Style.FILL);
+                mDockFillPaint.setColor((fillAlpha << 24) | fillBase);
+                canvas.drawRoundRect(mDockRectF, cornerRadius, cornerRadius, mDockFillPaint);
+
+                int rimAlpha = Math.round((isNight ? 0x48 : 0x88) * alphaMul);
+                mDockRimPaint.setStyle(android.graphics.Paint.Style.STROKE);
+                mDockRimPaint.setStrokeWidth(1.0f * d);
+                mDockRimPaint.setColor((rimAlpha << 24) | 0x00FFFFFF);
+                canvas.drawRoundRect(mDockRectF, cornerRadius, cornerRadius, mDockRimPaint);
+            }
+        }
+        super.dispatchDraw(canvas);
+    }
+
     /**
      * Sets the alpha value of the specified alpha channel of just our ShortcutAndWidgetContainer.
      */

@@ -185,6 +185,19 @@ public class LauncherSwipeHandlerV2 extends AbsSwipeUpHandler<
             }
 
             @Override
+            public boolean isWidget() {
+                return true;
+            }
+
+            @Override
+            protected float getWindowCornerRadius(float progress) {
+                float startRadius = com.android.systemui.shared.system.QuickStepContract
+                        .getWindowCornerRadius(mContext);
+                float endRadius = islandRect.height() / 2f;
+                return com.android.launcher3.Utilities.mapRange(progress, startRadius, endRadius);
+            }
+
+            @Override
             public void setAnimation(RectFSpringAnim anim) {
                 mSiblingAnimation = anim;
             }
@@ -213,7 +226,7 @@ public class LauncherSwipeHandlerV2 extends AbsSwipeUpHandler<
             protected void playScalingRevealAnimation() {
                 if (mContainer != null) {
                     new ScalingWorkspaceRevealAnim(
-                            mContainer, mSiblingAnimation, islandRect,
+                            mContainer, null /* siblingAnimation */, null /* windowTargetRect */,
                             false /* playAlphaReveal */, true /* playBlur */,
                             false /* inHotseat */, true /* fadeInHome */).start();
                 }

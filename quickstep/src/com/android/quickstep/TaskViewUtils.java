@@ -308,11 +308,6 @@ public final class TaskViewUtils {
                     tvsLocal.setPivotOverride(TEMP_PIVOT);
                 }
             });
-            out.addOnFrameCallback(() -> {
-                for (RemoteTargetHandle handle : remoteTargetHandles) {
-                    handle.getTaskViewSimulator().apply(handle.getTransformParams());
-                }
-            });
             if (navBarTarget != null) {
                 final Rect cropRect = new Rect();
                 out.addOnFrameListener(new MultiValueUpdateListener() {
@@ -353,6 +348,12 @@ public final class TaskViewUtils {
             }
             topMostSimulators = remoteTargetHandles;
         }
+
+        out.addOnFrameCallback(() -> {
+            for (RemoteTargetHandle handle : remoteTargetHandles) {
+                handle.getTaskViewSimulator().apply(handle.getTransformParams());
+            }
+        });
 
         int taskIndex = recentsView.indexOfChild(taskView);
         boolean parallaxCenterAndAdjacentTask = !dp.getDeviceProperties().isLargeScreen()

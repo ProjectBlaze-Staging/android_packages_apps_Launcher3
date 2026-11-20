@@ -16,8 +16,11 @@
 package com.android.launcher3.icons;
 
 import android.content.Context;
+import android.content.pm.ComponentInfo;
+import android.content.pm.PackageItemInfo;
 import android.content.res.Resources;
 import android.content.res.XmlResourceParser;
+import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.util.ArrayMap;
 import android.util.Log;
@@ -52,12 +55,15 @@ public class LauncherIconProvider extends IconProvider {
 
     protected final ThemeManager mThemeManager;
 
+    private final BlazeIconPackManager mIconPackManager;
+
     @Inject
     public LauncherIconProvider(
             @ApplicationContext Context context,
             ThemeManager themeManager) {
         super(context);
         mThemeManager = themeManager;
+        mIconPackManager = new BlazeIconPackManager(context);
         mThemedIconMap = FeatureFlags.USE_LOCAL_ICON_OVERRIDES.get() ? null : DISABLED_MAP;
     }
 
@@ -67,10 +73,22 @@ public class LauncherIconProvider extends IconProvider {
     }
 
     @Override
+    protected Drawable getIconPackIcon(PackageItemInfo info, int iconDpi) {
+        String pack = mThemeManager.getIconState().getIconPackCode();
+        if (TextUtils.isEmpty(pack)) {
+            return null;
+        }
+        String className = info instanceof ComponentInfo ? info.name : null;
+        return mIconPackManager.loadIcon(pack, info.packageName, className, iconDpi);
+    }
+
+    @Override
     public void updateSystemState() {
         super.updateSystemState();
+        // The selected icon pack is part of the cache key, so icons are rebuilt when it changes.
         mSystemState = mSystemState.withTheme(
-                mThemeManager.getIconState().getThemeCode(),
+                mThemeManager.getIconState().getThemeCode()
+                        + "|ip:" + mThemeManager.getIconState().getIconPackCode(),
                 mThemeManager.getIconState().isCircle());
     }
 
